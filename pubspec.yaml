@@ -34,6 +34,9 @@ dependencies:
   wakelock: ^0.5.2
   shared_preferences: ^2.0.6
   telephony: ^0.1.4
+  notifications: ^2.0.1
+  flutter_local_notifications: ^7.0.0
+  android_alarm_manager_plus: ^1.0.2
 
 flutter_icons:
   android: true

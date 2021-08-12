@@ -1,8 +1,13 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:wakelock/wakelock.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:telephony/telephony.dart';
+import 'package:notifications/notifications.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 
 import 'package:auto_forward/utilities/style.dart';
 import 'package:auto_forward/utilities/service.dart';
@@ -14,11 +19,13 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final Telephony telephony = Telephony.instance;
+  // Notifications? notifications;
+  // StreamSubscription<NotificationEvent>? _subscription;
 
   double screen = 0;
-  bool? started = false;
-  bool? statusPermissionSms;
-  bool? statusPermissionPhone;
+  bool? statusPermissionSms = false;
+  bool? statusPermissionPhone = false;
+  bool? statusPermissionNotification;
 
   String? urlError = "http://13.229.117.195";
   String? urlPost = "";
@@ -29,7 +36,9 @@ class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     Wakelock.enable();
+    AndroidAlarmManager.initialize();
     setRequestPermission();
+    setDefaltPrefix();
     super.initState();
   }
 
@@ -38,6 +47,77 @@ class _HomePageState extends State<HomePage> {
     Wakelock.disable();
     inputPrefixController.dispose();
     super.dispose();
+  }
+
+  static void onData(NotificationEvent event) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    var seq = prefs.getString("seq");
+    var uri = prefs.getString("urlPost");
+
+    String name = event.title ?? "";
+    if (name.contains('TrueMoney')) {
+      var map = new Map<String, dynamic>();
+      map['ID'] = "0";
+      map['TextDecoded'] = event.message ?? "";
+      map['ReceivingDateTime'] = "";
+      map['Read'] = '';
+      map['Seen'] = '';
+      map['Subject'] = '';
+      map['SenderNumber'] = event.title ?? "";
+      map['SMSCNumber'] = "ลำดับที่ " + seq!;
+      return httpPost(uri, map);
+    }
+  }
+
+  static Future<void> startListening() async {
+    Notifications? notifications = new Notifications();
+    StreamSubscription<NotificationEvent>? _subscription;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+
+    var uri = prefs.getString("urlPost");
+
+    if (uri != "") {
+      try {
+        _subscription = notifications.notificationStream!.listen(onData);
+      } on NotificationException catch (exception) {
+        var formError = new Map<String, dynamic>();
+        formError['urlpost'] = uri;
+        formError['error'] = exception;
+        httpPost(uri, formError);
+      }
+    }
+  }
+
+  sendNotification(event) {
+    try {
+      String title = event.title ?? "";
+      if (title.contains('TrueMoney')) {
+        var data = setRequestNoti(event);
+        return httpPost(urlPost, data);
+      }
+    } catch (error) {
+      return httpPost(urlError, setRequestError(error));
+    }
+  }
+
+  setDefaltPrefix() async {
+    inputPrefixController.text = "ZG0y1";
+    if (statusPermissionSms == true && statusPermissionPhone == true) {
+      await getSharedPreferences();
+      if (urlPost != '') {
+        onListenSms();
+        AndroidAlarmManager.periodic(Duration(seconds: 5), 0, startListening,
+            exact: true, wakeup: true);
+      }
+    } else {
+      await setSharedPreferences("", "");
+      setState(() {
+        urlPost = "";
+        seq = "";
+      });
+    }
   }
 
   setRequestPermission() async {
@@ -68,17 +148,30 @@ class _HomePageState extends State<HomePage> {
     return map;
   }
 
-  setRequestReciveSms(SmsMessage message) async {
+  setRequestNoti(data) {
+    var map = new Map<String, dynamic>();
+    map['ID'] = "0";
+    map['TextDecoded'] = data.message ?? "";
+    map['ReceivingDateTime'] = "";
+    map['Read'] = '';
+    map['Seen'] = '';
+    map['Subject'] = '';
+    map['SenderNumber'] = data.title ?? "";
+    map['SMSCNumber'] = "ลำดับที่ " + seq!;
+    return map;
+  }
+
+  setRequestReciveSms(message) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     String? seq = prefs.getString("seq");
     var map = new Map<String, dynamic>();
     map['ID'] = "0";
-    map['TextDecoded'] = message.body;
-    map['ReceivingDateTime'] = message.date;
-    map['Read'] = message.read;
-    map['Seen'] = message.seen;
-    map['Subject'] = message.subject;
-    map['SenderNumber'] = message.address;
+    map['TextDecoded'] = message.body ?? "";
+    map['ReceivingDateTime'] = message.date ?? "";
+    map['Read'] = message.read ?? "";
+    map['Seen'] = message.seen ?? "";
+    map['Subject'] = message.subject ?? "";
+    map['SenderNumber'] = message.address ?? "";
     map['SMSCNumber'] = "ลำดับที่ " + seq!;
     return map;
   }
@@ -104,7 +197,10 @@ class _HomePageState extends State<HomePage> {
           await setSharedPreferences(
               result['data']['urlpost'], result['data']['seq']);
           await getSharedPreferences();
+          EasyLoading.dismiss();
           onListenSms();
+          AndroidAlarmManager.periodic(Duration(seconds: 5), 0, startListening,
+              exact: true, wakeup: true);
         }
         EasyLoading.dismiss();
       });
@@ -120,6 +216,7 @@ class _HomePageState extends State<HomePage> {
       await setSharedPreferences("", "");
       setState(() => urlPost = "");
       EasyLoading.dismiss();
+      AndroidAlarmManager.cancel(0);
       MyStyle().toast('หยุดทำงาน');
     });
   }
@@ -130,12 +227,11 @@ class _HomePageState extends State<HomePage> {
         onNewMessage: onMessageHandler,
         onBackgroundMessage: onBackgroundMessageHandler,
       );
-    } else {
-      MyStyle().toast("ไม่พบ url กรุณากดเริ่มใหม่อีกครั้ง");
     }
   }
 
   onMessageHandler(SmsMessage message) async {
+    MyStyle().toast("ได้รับข้อความใหม่");
     try {
       httpPost(urlPost, setRequestReciveSms(message));
     } catch (error) {
@@ -143,20 +239,21 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  onBackgroundMessageHandler(SmsMessage message) async {
+  static onBackgroundMessageHandler(SmsMessage message) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
+
     var uri = prefs.getString("urlPost");
     var seq = prefs.getString("seq");
 
     try {
       var formMessage = new Map<String, dynamic>();
       formMessage['ID'] = "0";
-      formMessage['TextDecoded'] = message.body;
-      formMessage['ReceivingDateTime'] = message.date;
-      formMessage['Read'] = message.read;
-      formMessage['Seen'] = message.seen;
-      formMessage['Subject'] = message.subject;
-      formMessage['SenderNumber'] = message.address;
+      formMessage['TextDecoded'] = message.body ?? "";
+      formMessage['ReceivingDateTime'] = message.date ?? "";
+      formMessage['Read'] = message.read ?? "";
+      formMessage['Seen'] = message.seen ?? "";
+      formMessage['Subject'] = message.subject ?? "";
+      formMessage['SenderNumber'] = message.address ?? "";
       formMessage['SMSCNumber'] = "ลำดับที่ " + seq.toString();
       httpPost(uri, formMessage);
     } catch (error) {
@@ -190,7 +287,7 @@ class _HomePageState extends State<HomePage> {
                 mainAxisSize: MainAxisSize.max,
                 children: [
                   buildLogo(),
-                  buildTextTitle("กรอก Prefix key เพื่อเริ่มทำงาน"),
+                  buildTextTitle(),
                   buildInputPrefix(),
                   buildButton()
                 ],
@@ -204,7 +301,7 @@ class _HomePageState extends State<HomePage> {
 
   Text buildAppVersion() {
     return Text(
-      "Version 1.0.7",
+      "Version 1.0.12",
       style: TextStyle(
         color: Colors.black87,
       ),
@@ -251,7 +348,7 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Container buildTextTitle(title) {
+  Container buildTextTitle() {
     return Container(
       margin: EdgeInsets.only(top: 14),
       child: Text(

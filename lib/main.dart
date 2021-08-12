@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:auto_forward/router.dart';
+import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 
 void main() async {
