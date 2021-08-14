@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
@@ -19,8 +18,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   final Telephony telephony = Telephony.instance;
-  // Notifications? notifications;
-  // StreamSubscription<NotificationEvent>? _subscription;
+  Notifications? notifications;
+  StreamSubscription<NotificationEvent>? _subscription;
 
   double screen = 0;
   bool? statusPermissionSms = false;
@@ -49,43 +48,17 @@ class _HomePageState extends State<HomePage> {
     super.dispose();
   }
 
-  static void onData(NotificationEvent event) async {
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-
-    var seq = prefs.getString("seq");
-    var uri = prefs.getString("urlPost");
-
-    String name = event.title ?? "";
-    if (name.contains('TrueMoney')) {
-      var map = new Map<String, dynamic>();
-      map['ID'] = "0";
-      map['TextDecoded'] = event.message ?? "";
-      map['ReceivingDateTime'] = "";
-      map['Read'] = '';
-      map['Seen'] = '';
-      map['Subject'] = '';
-      map['SenderNumber'] = event.title ?? "";
-      map['SMSCNumber'] = "ลำดับที่ " + seq!;
-      return httpPost(uri, map);
-    }
-  }
-
-  static Future<void> startListening() async {
-    Notifications? notifications = new Notifications();
-    StreamSubscription<NotificationEvent>? _subscription;
-
-    SharedPreferences prefs = await SharedPreferences.getInstance();
-
-    var uri = prefs.getString("urlPost");
-
-    if (uri != "") {
+  startListening() async {
+    if (urlPost != "") {
+      notifications = new Notifications();
       try {
-        _subscription = notifications.notificationStream!.listen(onData);
-      } on NotificationException catch (exception) {
+        _subscription =
+            notifications!.notificationStream!.listen(sendNotification);
+      } on NotificationException catch (error) {
         var formError = new Map<String, dynamic>();
-        formError['urlpost'] = uri;
-        formError['error'] = exception;
-        httpPost(uri, formError);
+        formError['urlpost'] = urlPost;
+        formError['error'] = error.toString();
+        httpPost(urlPost, formError);
       }
     }
   }
@@ -103,21 +76,13 @@ class _HomePageState extends State<HomePage> {
   }
 
   setDefaltPrefix() async {
-    inputPrefixController.text = "ZG0y1";
-    if (statusPermissionSms == true && statusPermissionPhone == true) {
+    // inputPrefixController.text = "ZG0y1";
+    // inputPrefixController.text = "ZGVtbw1";
       await getSharedPreferences();
       if (urlPost != '') {
         onListenSms();
-        AndroidAlarmManager.periodic(Duration(seconds: 5), 0, startListening,
-            exact: true, wakeup: true);
+        startListening();
       }
-    } else {
-      await setSharedPreferences("", "");
-      setState(() {
-        urlPost = "";
-        seq = "";
-      });
-    }
   }
 
   setRequestPermission() async {
@@ -129,11 +94,11 @@ class _HomePageState extends State<HomePage> {
 
   setSharedPreferences(url, seq) async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
-    prefs.setString("urlPost", url);
-    prefs.setString("seq", seq);
+    await prefs.setString("urlPost", url);
+    await prefs.setString("seq", seq);
   }
 
-  getSharedPreferences() async {
+  Future getSharedPreferences() async {
     SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
       urlPost = prefs.getString("urlPost");
@@ -144,7 +109,6 @@ class _HomePageState extends State<HomePage> {
   setBodyLogin() {
     var map = new Map<String, dynamic>();
     map['prefixkey'] = inputPrefixController.text;
-    // map['prefixkey'] = "ZG0y1";
     return map;
   }
 
@@ -197,10 +161,9 @@ class _HomePageState extends State<HomePage> {
           await setSharedPreferences(
               result['data']['urlpost'], result['data']['seq']);
           await getSharedPreferences();
+           onListenSms();
+           startListening();
           EasyLoading.dismiss();
-          onListenSms();
-          AndroidAlarmManager.periodic(Duration(seconds: 5), 0, startListening,
-              exact: true, wakeup: true);
         }
         EasyLoading.dismiss();
       });
@@ -216,7 +179,6 @@ class _HomePageState extends State<HomePage> {
       await setSharedPreferences("", "");
       setState(() => urlPost = "");
       EasyLoading.dismiss();
-      AndroidAlarmManager.cancel(0);
       MyStyle().toast('หยุดทำงาน');
     });
   }
@@ -259,7 +221,7 @@ class _HomePageState extends State<HomePage> {
     } catch (error) {
       var formError = new Map<String, dynamic>();
       formError['urlpost'] = uri;
-      formError['error'] = error;
+      formError['error'] = error.toString();
       httpPost(uri, formError);
     }
   }
@@ -301,7 +263,7 @@ class _HomePageState extends State<HomePage> {
 
   Text buildAppVersion() {
     return Text(
-      "Version 1.0.12",
+      "Version 1.0.14",
       style: TextStyle(
         color: Colors.black87,
       ),
